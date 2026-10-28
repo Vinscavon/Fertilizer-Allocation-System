@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fertilizer Distribution</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+:root{--bg:#f6f7f4;--card:#fff;--ink:#1d2a1f;--mut:#667;--line:#dde2d8;--brand:#2f7d32;--brand2:#e8f3e8;--bad:#c62828;--badbg:#fdecea;--warn:#b26a00;--warnbg:#fff4e0}
+@media(prefers-color-scheme:dark){:root{--bg:#141a15;--card:#1c241d;--ink:#e6ece6;--mut:#9aa89b;--line:#2b362c;--brand:#6fcf73;--brand2:#223624;--bad:#ff8a80;--badbg:#3a1f1d;--warn:#ffcc80;--warnbg:#3a2e17}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--brand);color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+@media(prefers-color-scheme:dark){header{color:#0b1a0c}}
+header b{font-size:16px}
+nav{display:flex;gap:4px;padding:8px 12px;overflow-x:auto;background:var(--card);border-bottom:1px solid var(--line)}
+nav button{border:0;background:none;color:var(--ink);padding:8px 12px;border-radius:8px;cursor:pointer;white-space:nowrap;font:inherit}
+nav button.on{background:var(--brand2);color:var(--brand);font-weight:600}
+main{max-width:1000px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+h2{margin:0 0 10px;font-size:17px}h3{margin:12px 0 6px;font-size:15px}
+label{display:block;font-size:13px;color:var(--mut);margin:8px 0 3px}
+input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+button.btn{background:var(--brand);color:#fff;border:0;padding:9px 14px;border-radius:8px;cursor:pointer;font:inherit;margin-top:10px}
+@media(prefers-color-scheme:dark){button.btn{color:#0b1a0c}}
+button.btn.sec{background:var(--brand2);color:var(--brand)}
+button.btn.sm{padding:4px 9px;margin:0;font-size:13px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.row{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:12px}
+.wrap{overflow-x:auto}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;background:var(--brand2);color:var(--brand)}
+.pill.bad{background:var(--badbg);color:var(--bad)}.pill.warn{background:var(--warnbg);color:var(--warn)}
+.stat{font-size:26px;font-weight:700}.mut{color:var(--mut);font-size:13px}
+.msg{padding:9px 12px;border-radius:8px;margin-top:10px;font-size:14px}
+.msg.ok{background:var(--brand2);color:var(--brand)}.msg.err{background:var(--badbg);color:var(--bad)}
+.bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--brand)}
+#reader{max-width:320px;margin-top:8px}
+.login{max-width:340px;margin:60px auto}
+.codes{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.lbl{border:1px dashed var(--mut);border-radius:8px;padding:8px;text-align:center;font:600 12px monospace;background:#fff;color:#000}
+.lbl div.qr{display:flex;justify-content:center;margin-bottom:4px}
+@media print{header,nav,.noprint{display:none!important}.card{border:0}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let USER=null, TAB=null, CENTERS=[];
+async function api(url,method='GET',data){
+  const r=await fetch(url,{method,headers:{'Content-Type':'application/json'},body:data?JSON.stringify(data):undefined});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error||('Error '+r.status));
+  return j;
+}
+function msg(el,text,ok=true){el.innerHTML=`<div class="msg ${ok?'ok':'err'}">${esc(text)}</div>`}
+function pill(s){const bad=['MISSING','OPEN','DISCREPANCY','EXPIRED','CANCELLED','REJECTED_LOAD','REJECTED_UNLOAD'].includes(s);
+  const warn=['IN_TRANSIT','LOADING','LOADED','BUILT','PAID'].includes(s);return `<span class="pill ${bad?'bad':warn?'warn':''}">${esc(s)}</span>`}
+function table(cols,data,rowfn){return `<div class="wrap"><table><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>${data.map(rowfn).join('')||`<tr><td colspan="${cols.length}" class="mut">Nothing yet</td></tr>`}</table></div>`}
+function centerOpts(){return CENTERS.map(c=>`<option value="${c.id}">${esc(c.name)} (${esc(c.area_name)})</option>`).join('')}
+function qr(el,text,size=96){new QRCode(el,{text,width:size,height:size})}
+
+const TABS={
+  admin:['Dashboard','Allocations','Farmers','Vouchers','Pallets','Waybills','Alerts','Audit','SMS','Integration'],
+  warehouse:['Pallets','Waybills','Alerts'],
+  driver:['Waybills'],
+  center:['Dashboard','Receive','Redeem','Farmers','Vouchers','Alerts'],
+  auditor:['Dashboard','Alerts','Scans','Audit']
+};
+
+async function boot(){
+  USER=await api('/api/me').catch(()=>null);
+  if(!USER) return loginView();
+  CENTERS=await api('/api/centers');
+  const tabs=TABS[USER.role];
+  TAB=TAB&&tabs.includes(TAB)?TAB:tabs[0];
+  $('#app').innerHTML=`<header><b>🌾 Fertilizer Distribution</b><span>${esc(USER.full_name||USER.username)} · ${USER.role}
+    <button class="btn sec sm" onclick="logout()">Logout</button></span></header>
+    <nav>${tabs.map(t=>`<button class="${t===TAB?'on':''}" onclick="go('${t}')">${t}</button>`).join('')}</nav>
+    <main id="main"></main>`;
+  VIEWS[TAB]($('#main'));
+}
+function go(t){TAB=t;boot()}
+async function logout(){await api('/api/logout','POST');USER=null;boot()}
+function loginView(){
+  $('#app').innerHTML=`<div class="login card"><h2>🌾 Fertilizer Distribution</h2>
+  <label>Username</label><input id="u" autocomplete="username"><label>Password</label><input id="p" type="password" autocomplete="current-password">
+  <button class="btn" id="go">Sign in</button><div id="m"></div>
+  <p class="mut">Demo logins: admin/admin123 · warehouse1/ware123 · driver1/drive123 · kesses_clerk/center123 · auditor1/audit123</p></div>`;
+  const submit=async()=>{try{await api('/api/login','POST',{username:$('#u').value,password:$('#p').value});boot()}catch(e){msg($('#m'),e.message,false)}};
+  $('#go').onclick=submit;$('#p').onkeydown=e=>e.key==='Enter'&&submit();
+}
+
+// ---------- scanner widget: camera + manual/USB scanner input
+function scannerBox(host,onCode,label='Scan or type code'){
+  host.innerHTML=`<label>${label}</label><div style="display:flex;gap:8px"><input class="scin" placeholder="Scan with USB scanner or type, then Enter" autofocus>
+  <button class="btn sec sm cam" style="margin:0;white-space:nowrap">📷 Camera</button></div><div class="reader" id="reader"></div>`;
+  const inp=$('.scin',host);let cam=null;
+  const fire=c=>{c=c.trim();if(c){onCode(c);inp.value='';inp.focus()}};
+  inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();fire(inp.value)}};
+  $('.cam',host).onclick=async()=>{
+    if(cam){await cam.stop().catch(()=>{});cam=null;$('#reader').innerHTML='';return}
+    if(!window.Html5Qrcode){alert('Camera scanner library not loaded (check internet). Use the text box.');return}
+    cam=new Html5Qrcode('reader');let last='',lt=0;
+    cam.start({facingMode:'environment'},{fps:10,qrbox:220},t=>{const n=Date.now();if(t===last&&n-lt<2500)return;last=t;lt=n;fire(t)}).catch(e=>alert('Camera error: '+e));
+  };
+}
+
+const VIEWS={
+async Dashboard(m){
+  const [al,sm]=await Promise.all([api('/api/allocations'),api('/api/summary')]);
+  m.innerHTML=`<div class="grid">
+   <div class="card"><div class="mut">Open alerts</div><div class="stat" style="color:${sm.open_discrepancies?'var(--bad)':'inherit'}">${sm.open_discrepancies}</div></div>
+   <div class="card"><div class="mut">Trucks in transit</div><div class="stat">${sm.waybills_in_transit}</div></div>
+   <div class="card"><div class="mut">Vouchers waiting pickup</div><div class="stat">${sm.vouchers_paid}</div></div>
+   <div class="card"><div class="mut">Vouchers redeemed</div><div class="stat">${sm.vouchers_redeemed}</div></div></div>
+  <div class="card"><h2>Allocation by center</h2>${table(['Center','Area','Allocated','Sold','Left to sell','In transit','In stock','Issued'],al,a=>
+   `<tr><td>${esc(a.center_name)}</td><td>${esc(a.area_name)}</td><td>${a.total_bags}</td><td>${a.sold}<div class="bar"><i style="width:${Math.min(100,a.sold/a.total_bags*100)}%"></i></div></td><td>${a.remaining}</td><td>${a.in_transit}</td><td><b>${a.in_stock}</b></td><td>${a.issued}</td></tr>`)}</div>`;
+},
+async Allocations(m){
+  const al=await api('/api/allocations');
+  m.innerHTML=`<div class="card"><h2>Set allocation for a center</h2><div class="row">
+   <div><label>Center</label><select id="c">${centerOpts()}</select></div>
+   <div><label>Total bags</label><input id="b" type="number" min="1"></div>
+   <div><label>Price per bag (KES)</label><input id="p" type="number" value="3500"></div></div>
+   <button class="btn" id="s">Save</button><div id="r"></div></div>
+   <div class="card"><h2>Current allocations</h2>${table(['Center','Bags','Price','Sold','Left'],al,a=>`<tr><td>${esc(a.center_name)}</td><td>${a.total_bags}</td><td>${a.price_per_bag}</td><td>${a.sold}</td><td>${a.remaining}</td></tr>`)}</div>`;
+  $('#s').onclick=async()=>{try{await api('/api/allocations','POST',{center_id:$('#c').value,total_bags:$('#b').value,price_per_bag:$('#p').value});VIEWS.Allocations(m)}catch(e){msg($('#r'),e.message,false)}};
+},
+async Farmers(m){
+  const fs=await api('/api/farmers');
+  m.innerHTML=`<div class="card"><h2>Register farmer</h2><div class="row">
+   <div><label>National ID</label><input id="n"></div><div><label>Full name</label><input id="nm"></div>
+   <div><label>Phone (+254…)</label><input id="ph"></div><div><label>Distribution center</label><select id="c">${centerOpts()}</select></div>
+   <div><label>Max bags (land size)</label><input id="mx" type="number" value="20"></div></div>
+   <button class="btn" id="s">Register</button><div id="r"></div></div>
+   <div class="card"><h2>Farmers</h2>${table(['ID','Name','Phone','Center','Cap'],fs,f=>`<tr><td>${esc(f.national_id)}</td><td>${esc(f.name)}</td><td>${esc(f.phone)}</td><td>${esc(f.center_name)}</td><td>${f.max_bags}</td></tr>`)}</div>`;
+  if(USER.role==='center'){$('#c').value=USER.center_id;$('#c').disabled=true}
+  $('#s').onclick=async()=>{try{await api('/api/farmers','POST',{national_id:$('#n').value,name:$('#nm').value,phone:$('#ph').value,center_id:$('#c').value,max_bags:$('#mx').value});VIEWS.Farmers(m)}catch(e){msg($('#r'),e.message,false)}};
+},
+async Vouchers(m){
+  const [fs,vs]=await Promise.all([api('/api/farmers'),api('/api/vouchers')]);
+  m.innerHTML=`<div class="card"><h2>Issue voucher after payment</h2>
+   <p class="mut">Production: this happens automatically from the M-Pesa callback. Here the clerk enters the M-Pesa reference.</p><div class="row">
+   <div><label>Farmer</label><select id="f">${fs.map(f=>`<option value="${f.id}">${esc(f.name)} · ${esc(f.national_id)}</option>`).join('')}</select></div>
+   <div><label>Bags paid for</label><input id="b" type="number" min="1" value="20"></div>
+   <div><label>M-Pesa reference</label><input id="mp" placeholder="e.g. SJK4X9L2QW"></div></div>
+   <button class="btn" id="s">Generate voucher</button><div id="r"></div><div id="v"></div></div>
+   <div class="card"><h2>Vouchers</h2>${table(['Code','Farmer','Center','Bags','KES','Status','Expires'],vs,v=>`<tr><td><code>${v.code}</code></td><td>${esc(v.farmer)}</td><td>${esc(v.center)}</td><td>${v.bags}</td><td>${v.amount}</td><td>${pill(v.status)}</td><td>${v.expires_at.slice(0,10)}</td></tr>`)}</div>`;
+  $('#s').onclick=async()=>{try{const v=await api('/api/vouchers','POST',{farmer_id:$('#f').value,bags:$('#b').value,mpesa_ref:$('#mp').value});
+    $('#r').innerHTML='';$('#v').innerHTML=`<div class="card" style="margin-top:12px;text-align:center"><div id="q" style="display:flex;justify-content:center"></div>
+      <h2 style="margin-top:8px"><code>${v.code}</code></h2><div>${v.bags} bags · KES ${v.amount} · ${esc(v.farmer)}</div><div class="mut">${esc(v.center)} · valid until ${v.expires_at.slice(0,10)}</div>
+      ${v.otp_demo?`<div class="msg ok">Demo mode: OTP sent by SMS is <b>${v.otp_demo}</b></div>`:''}
+      <button class="btn sec noprint" onclick="window.print()">Print voucher</button></div>`;qr($('#q'),v.code,140)}catch(e){msg($('#r'),e.message,false)}};
+},
+async Pallets(m){
+  const ps=await api('/api/pallets');
+  const canBuild=['admin','warehouse'].includes(USER.role);
+  m.innerHTML=(canBuild?`<div class="card"><h2>Build pallets & print labels</h2><div class="row">
+   <div><label>Destination center</label><select id="c">${centerOpts()}</select></div>
+   <div><label>Number of pallets</label><input id="n" type="number" value="5" min="1"></div>
+   <div><label>Bags per pallet</label><input id="k" type="number" value="40"></div>
+   <div><label>Batch / lot no.</label><input id="bt"></div></div>
+   <button class="btn" id="s">Create pallets</button><div id="r"></div><div id="labels" class="codes" style="margin-top:10px"></div></div>`:'')+
+   `<div class="card"><h2>Pallets</h2>${table(['Code','Bags','To center','Status','Waybill'],ps,p=>`<tr><td><code>${p.code}</code></td><td>${p.bags}</td><td>${esc(p.center_name)}</td><td>${pill(p.status)}</td><td>${p.waybill_id??''}</td></tr>`)}</div>`;
+  if(canBuild)$('#s').onclick=async()=>{try{const r=await api('/api/pallets','POST',{center_id:$('#c').value,count:$('#n').value,bags_per_pallet:$('#k').value,batch_no:$('#bt').value});
+    const L=$('#labels');L.innerHTML='';r.codes.forEach(c=>{const d=document.createElement('div');d.className='lbl';d.innerHTML='<div class="qr"></div>'+c;L.appendChild(d);qr($('.qr',d),c,90)});
+    $('#r').innerHTML=`<div class="msg ok">${r.codes.length} pallets created. <button class="btn sec sm noprint" onclick="window.print()">Print labels</button></div>`}catch(e){msg($('#r'),e.message,false)}};
+},
+async Waybills(m){
+  const ws=await api('/api/waybills');
+  const canNew=['admin','warehouse'].includes(USER.role);
+  m.innerHTML=(canNew?`<div class="card"><h2>New waybill (truck load)</h2><div class="row">
+   <div><label>Truck plate</label><input id="t"></div><div><label>Driver name</label><input id="d"></div>
+   <div><label>Destination center</label><select id="c">${centerOpts()}</select></div></div>
+   <button class="btn" id="s">Create waybill</button><div id="r"></div></div>`:'')+
+   `<div class="card"><h2>Waybills</h2>${table(['#','Truck','Driver','To','Pallets','Bags','Status',''],ws,w=>`<tr><td>${w.id}</td><td>${esc(w.truck_plate)}</td><td>${esc(w.driver_name)}</td><td>${esc(w.center_name)}</td><td>${w.pallets_total}</td><td>${w.bags_total}</td><td>${pill(w.status)}</td><td><button class="btn sm" onclick="openWb(${w.id})">Open</button></td></tr>`)}</div><div id="wb"></div>`;
+  if(canNew)$('#s').onclick=async()=>{try{const r=await api('/api/waybills','POST',{truck_plate:$('#t').value,driver_name:$('#d').value,center_id:$('#c').value});openWb(r.id)}catch(e){msg($('#r'),e.message,false)}};
+},
+async Receive(m){
+  const ws=(await api('/api/waybills')).filter(w=>w.status==='IN_TRANSIT');
+  m.innerHTML=`<div class="card"><h2>Trucks arriving</h2>${table(['#','Truck','Driver','Pallets','Bags','Seal',''],ws,w=>`<tr><td>${w.id}</td><td>${esc(w.truck_plate)}</td><td>${esc(w.driver_name)}</td><td>${w.pallets_total}</td><td>${w.bags_total}</td><td>${esc(w.seal_no)}</td><td><button class="btn sm" onclick="openWb(${w.id})">Receive</button></td></tr>`)}</div><div id="wb"></div>`;
+},
+async Redeem(m){
+  m.innerHTML=`<div class="card"><h2>Redeem voucher</h2><div id="sc"></div>
+   <div id="vinfo"></div><div class="row"><div><label>Farmer OTP (from SMS)</label><input id="o" inputmode="numeric"></div>
+   <div><label>Farmer national ID (check against ID card)</label><input id="n"></div></div>
+   <button class="btn" id="s">Release bags</button><div id="r"></div></div>`;
+  let code='';
+  scannerBox($('#sc'),async c=>{code=c.toUpperCase();try{const v=await api('/api/vouchers/'+encodeURIComponent(code));
+    $('#vinfo').innerHTML=`<div class="msg ${v.status==='PAID'?'ok':'err'}"><b>${v.code}</b> · ${esc(v.farmer)} · ${v.bags} bags · ${v.status}</div>`}catch(e){$('#vinfo').innerHTML='';msg($('#r'),e.message,false)}},'Scan voucher QR or type voucher code');
+  $('#s').onclick=async()=>{if(!code)return msg($('#r'),'Scan the voucher first',false);
+    try{const r=await api('/api/redeem','POST',{code,otp:$('#o').value,national_id:$('#n').value});msg($('#r'),`✔ Release ${r.bags} bags. Stock left at center: ${r.stock_left}`);$('#o').value=$('#n').value='';$('#vinfo').innerHTML='';code=''}catch(e){msg($('#r'),e.message,false)}};
+},
+async Alerts(m){
+  const ds=await api('/api/discrepancies');const canRes=['admin','auditor'].includes(USER.role);
+  m.innerHTML=`<div class="card"><h2>Discrepancy alerts</h2>${table(['#','When','Waybill','Truck / driver','Center','Type','Detail','Bags','Status',''],ds,d=>
+   `<tr><td>${d.id}</td><td>${d.created_at}</td><td>${d.waybill_id}</td><td>${esc(d.truck_plate)}<br>${esc(d.driver_name)}</td><td>${esc(d.center_name)}</td><td>${pill(d.kind)}</td><td>${esc(d.detail)}${d.resolution?`<br><i>${esc(d.resolution)}</i>`:''}</td><td>${d.bags_missing}</td><td>${pill(d.status)}</td>
+   <td>${canRes&&d.status==='OPEN'?`<button class="btn sm" onclick="resolveD(${d.id})">Resolve</button>`:''}</td></tr>`)}</div>`;
+},
+async Scans(m){const s=await api('/api/scans');m.innerHTML=`<div class="card"><h2>Scan log</h2>${table(['Time','Type','Pallet','Waybill','User','Device','GPS','Note'],s,x=>`<tr><td>${x.created_at}</td><td>${pill(x.scan_type)}</td><td><code>${esc(x.pallet_code)}</code></td><td>${x.waybill_id??''}</td><td>${esc(x.username)}</td><td>${esc((x.device||'').slice(0,30))}</td><td>${x.lat?x.lat+','+x.lng:''}</td><td>${esc(x.note)}</td></tr>`)}</div>`},
+async Audit(m){const a=await api('/api/audit');m.innerHTML=`<div class="card"><h2>Audit log</h2>${table(['Time','User','Action','Detail'],a,x=>`<tr><td>${x.created_at}</td><td>${esc(x.username)}</td><td>${esc(x.action)}</td><td>${esc(x.detail)}</td></tr>`)}</div>`},
+async Integration(m){
+  const [st,keys]=await Promise.all([api('/api/integration/outbox'),api('/api/integration/keys')]);
+  const c=st.counts||{};
+  const kinds=['vouchers','farmers','centers','allocations','stock','waybills','discrepancies'];
+  m.innerHTML=`<div class="card"><h2>Event feed to ERP / other system</h2>
+   <div class="mut">${st.webhook_configured?'Pushing to '+esc(st.webhook_url):'No webhook set (ERP_WEBHOOK_URL). The other system can pull events with its API key.'}</div>
+   <div class="grid" style="margin-top:8px"><div><div class="mut">Waiting</div><div class="stat">${c.PENDING||0}</div></div>
+   <div><div class="mut">Delivered</div><div class="stat">${c.SENT||0}</div></div>
+   <div><div class="mut">Failed</div><div class="stat" style="color:${c.FAILED?'var(--bad)':'inherit'}">${c.FAILED||0}</div></div></div>
+   <button class="btn" id="fl">Send now</button> <button class="btn sec" id="rt">Retry failed</button><div id="fr"></div>
+   ${table(['#','Event','Status','Tries','Error','Created'],st.recent,e=>`<tr><td>${e.id}</td><td>${esc(e.event_type)}</td><td>${pill(e.status==='SENT'?'OK':e.status)}</td><td>${e.attempts}</td><td>${esc(e.last_error)}</td><td>${e.created_at}</td></tr>`)}</div>
+  <div class="card"><h2>API keys</h2><p class="mut">Give a key to the other system's team. Send it in the X-API-Key header.</p>
+   <div class="row"><div><label>Key name</label><input id="kn" placeholder="e.g. County ERP"></div></div>
+   <button class="btn" id="kc">Create key</button><div id="kr"></div>
+   ${table(['Name','Created','Last used','Status',''],keys,k=>`<tr><td>${esc(k.name)}</td><td>${k.created_at}</td><td>${k.last_used_at||'never'}</td><td>${pill(k.active?'OK':'EXPIRED')}</td><td>${k.active?`<button class="btn sm" onclick="revokeKey(${k.id})">Revoke</button>`:''}</td></tr>`)}</div>
+  <div class="card"><h2>Export (CSV)</h2><div style="display:flex;flex-wrap:wrap;gap:8px">${kinds.map(k=>`<a class="btn sec sm" style="text-decoration:none;padding:6px 10px" href="/api/integration/export/${k}.csv">${k}</a>`).join('')}</div></div>
+  <div class="card"><h2>Import (CSV)</h2><div class="row"><div><label>Type</label><select id="ik"><option>centers</option><option>farmers</option><option>allocations</option></select></div>
+   <div><label>CSV file</label><input id="if" type="file" accept=".csv"></div></div>
+   <p class="mut" id="ih"></p><button class="btn" id="ig">Import</button><div id="ir"></div></div>`;
+  const HINT={centers:'columns: external_id, name, area',farmers:'columns: external_id, national_id, name, phone, center_external_id (or center), max_bags',allocations:'columns: center_external_id (or center), total_bags, price_per_bag, product'};
+  const hint=()=>$('#ih').textContent=HINT[$('#ik').value];hint();$('#ik').onchange=hint;
+  $('#fl').onclick=async()=>{try{const r=await api('/api/integration/outbox/flush','POST');msg($('#fr'),`Sent ${r.sent}, failed ${r.failed}`);setTimeout(()=>VIEWS.Integration(m),1200)}catch(e){msg($('#fr'),e.message,false)}};
+  $('#rt').onclick=async()=>{await api('/api/integration/outbox/retry-failed','POST');VIEWS.Integration(m)};
+  $('#kc').onclick=async()=>{try{const r=await api('/api/integration/keys','POST',{name:$('#kn').value});
+    $('#kr').innerHTML=`<div class="msg ok">Copy this key now, it will not be shown again:<br><code style="word-break:break-all">${esc(r.api_key)}</code></div>`}catch(e){msg($('#kr'),e.message,false)}};
+  $('#ig').onclick=async()=>{const f=$('#if').files[0];if(!f)return msg($('#ir'),'Choose a CSV file first',false);
+    const fd=new FormData();fd.append('file',f);
+    try{const r=await fetch('/api/integration/import/'+$('#ik').value,{method:'POST',body:fd});const j=await r.json();if(!r.ok)throw new Error(j.error);
+      msg($('#ir'),`Created ${j.created}, updated ${j.updated}, errors ${j.errors.length}${j.errors.length?': '+j.errors.map(e=>'row '+e.row+' '+e.error).join('; '):''}`,!j.errors.length)}catch(e){msg($('#ir'),e.message,false)}};
+},
+async SMS(m){const a=await api('/api/sms');m.innerHTML=`<div class="card"><h2>SMS outbox (simulated)</h2>${table(['Time','Phone','Message'],a,x=>`<tr><td>${x.created_at}</td><td>${esc(x.phone)}</td><td>${esc(x.message)}</td></tr>`)}</div>`}
+};
+
+async function revokeKey(id){if(confirm('Revoke this key? The other system will lose access.')){await api(`/api/integration/keys/${id}/revoke`,'POST');VIEWS.Integration($('#main'))}}
+async function resolveD(id){const r=prompt('How was this resolved?');if(r){try{await api(`/api/discrepancies/${id}/resolve`,'POST',{resolution:r});boot()}catch(e){alert(e.message)}}}
+
+// ---------- waybill detail: loading (warehouse), driver confirm, dispatch, unloading (center)
+async function openWb(id){
+  const w=await api('/api/waybills/'+id);const host=$('#wb')||$('#main');
+  if(!$('#wb')){host.innerHTML='<div id="wb"></div>'}
+  const box=$('#wb');
+  const role=USER.role;
+  let actions='';
+  if(w.status==='LOADING'&&['warehouse','admin'].includes(role)){
+    actions=`<div id="sc"></div><div id="r"></div>
+      <div class="row"><div><label>Truck seal number</label><input id="seal" placeholder="after driver confirms"></div></div>
+      <button class="btn" id="disp">Seal & dispatch</button>`;
+  }
+  if(w.status==='LOADING'&&['driver','admin'].includes(role)){
+    actions+=`<h3>Driver confirmation</h3>${w.driver_ack?'<div class="msg ok">Driver confirmed counts ✔</div>':`<div class="row"><div><label>Pallets on truck</label><input id="dp" type="number"></div><div><label>Total bags</label><input id="db" type="number"></div></div><button class="btn" id="dc">Confirm counts</button>`}<div id="r2"></div>`;
+  }
+  if(w.status==='IN_TRANSIT'&&role==='center'){
+    actions=`<div class="msg ${''}" style="background:var(--warnbg);color:var(--warn)">Expected seal: check it is intact and matches <b>${esc(w.seal_no)}</b> before opening.</div>
+      <div id="sc"></div><div id="r"></div><div class="row"><div><label>Seal number on truck</label><input id="seal"></div></div>
+      <button class="btn" id="fin">Finish unloading & check</button>`;
+  }
+  box.innerHTML=`<div class="card"><h2>Waybill #${w.id} — ${esc(w.truck_plate)} → ${esc(w.center_name)} ${pill(w.status)}</h2>
+    <div class="mut">Driver: ${esc(w.driver_name)} · Seal: ${esc(w.seal_no||'—')} · ${w.pallets_total} pallets / ${w.bags_total} bags${w.status==='IN_TRANSIT'?` · received ${w.pallets_received}/${w.pallets_total}`:''}</div>
+    ${actions}
+    <h3>Pallets</h3>${table(['Code','Bags','Status'],w.pallets,p=>`<tr><td><code>${p.code}</code></td><td>${p.bags}</td><td>${pill(p.status)}</td></tr>`)}</div>`;
+  if($('#sc')){
+    const isLoad=w.status==='LOADING';
+    scannerBox($('#sc'),async c=>{try{await api(`/api/waybills/${id}/${isLoad?'load':'unload'}`,'POST',{pallet_code:c});await openWb(id);msg($('#r'),'✔ '+c+(isLoad?' loaded':' received'))}
+      catch(e){msg($('#r'),'✖ '+e.message+' ('+c+')',false)}},isLoad?'Scan pallet being LOADED':'Scan pallet being UNLOADED');
+  }
+  if($('#dc'))$('#dc').onclick=async()=>{try{await api(`/api/waybills/${id}/driver-confirm`,'POST',{pallets:$('#dp').value,bags:$('#db').value});openWb(id)}catch(e){msg($('#r2'),e.message,false)}};
+  if($('#disp'))$('#disp').onclick=async()=>{try{await api(`/api/waybills/${id}/dispatch`,'POST',{seal_no:$('#seal').value});boot()}catch(e){msg($('#r'),e.message,false)}};
+  if($('#fin'))$('#fin').onclick=async()=>{try{const r=await api(`/api/waybills/${id}/finalize`,'POST',{seal_no:$('#seal').value});
+    if(r.status==='COMPLETED'){alert('All pallets received. Stock updated.')}else{alert('⚠ DISCREPANCY: '+r.issues.join(', ')+'. Supervisor has been alerted.')}boot()}catch(e){msg($('#r'),e.message,false)}};
+  box.scrollIntoView({behavior:'smooth'});
+}
+boot();
+</script>
+</body>
+</html>
